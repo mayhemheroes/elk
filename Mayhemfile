@@ -1,5 +1,5 @@
 project: rnshah9/elk
-target: elk
+target: cli
 
 cmds:
   - cmd: /repo/examples/cmdline/cli -e 'let math = require("/api.js");'
