@@ -2,5 +2,5 @@ project: elk
 target: cli
 
 cmds:
-  - cmd: /repo/examples/cmdline/cli -e 'let math = require("/api.js");'
+  - cmd: /cli -e 'let math = require("/api.js");'
     filepath: /api.js
