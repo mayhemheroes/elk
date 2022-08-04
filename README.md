@@ -7,22 +7,27 @@
 
 Elk is a tiny embeddable JavaScript engine that implements a small but usable
 subset of ES6. It is designed for microcontroller development. Instead of
-writing firmware code in C/C++, Elk allows to develop in JavaScript. 
-Another use case is providing customers with a secure, protected scripting
-environment for product customisation.
+writing firmware code entirely in C/C++, Elk allows to add JavaScript
+customisations to the firmware developed in C - which is a great way to let
+customers to extend/customise device functionality.
 
 Elk features include:
 
 - Cross platform. Works anywhere from 8-bit microcontrollers to 64-bit servers
 - Zero dependencies. Builds cleanly by ISO C or ISO C++ compilers
 - Easy to embed: just copy `elk.c` and `elk.h` to your source tree
-- Very small and simple embedding API
-- Can call native C/C++ functions from JavaScript and vice versa
+- Small and simple embedding API
 - Does not use malloc. Operates with a given memory buffer only
 - Small footprint: about 20KB on flash/disk, about 100 bytes RAM for core VM
 - No bytecode. Interprets JS code directly
 
-Below is a demonstration on a classic Arduino Nano board which has
+Elk approach is different from other scripting environments like micropython,
+which provide a complete JS API for everything.  Elk is completely bare, it
+does not even have a standard library. All required functionality is supposed
+to be imported from C/C++ firmware, and JS code simply orchestrates things.
+That leaves Elk very minimal and tunable.
+
+Below is a blinky demonstration on a classic Arduino Nano board which has
 2K RAM and 30K flash (see [full sketch](examples/BlinkyJS/BlinkyJS.ino)):
 
 ![Elk on Arduino Nano](test/nano.gif)
@@ -32,25 +37,13 @@ Below is a demonstration on a classic Arduino Nano board which has
 
 The [Esp32JS](examples/Esp32JS) Arduino sketch is an example of Elk integration
 with ESP32. Flash this sketch on your ESP32 board, go to http://elk-js.com,
-and get a JavaScript development environment instantly! Reloading your script
-takes a fraction of a second - compare that with a regular reflashing..
-Here how it looks like:
+and get a JavaScript development environment instantly! All components,
+including ESP32 firmware and Web editor, are open.  Here how it looks like:
 
 ![](test/editor.png)
 
-The example JS firmware implements:
-- Blinks an LED periodically
-- Connects to the [HiveMQ](http://www.hivemq.com/demos/websocket-client/)
-  MQTT server
-- Subscribes to the `elk/rx` topic
-- When an MQTT message is received, sends some stats to the `elk/tx` topic:
-
-
-That's screenshot is taken from the MQTT server which shows that we sent
-a `hello JS!` message and received stats in response:
-
-![](test/mqtt.png)
-
+The example JS firmware implements a classic blinky that uses timers imported
+from C.
 
 
 ## Call JavaScript from C
@@ -76,17 +69,19 @@ This demonstrates how JS code can import and call existing C functions:
 #include "elk.h"
 
 // C function that adds two numbers. Will be called from JS
-int sum(int a, int b) {
-  return a + b;
+jsval_t sum(struct js *js, jsval_t *args, int nargs) {
+  if (nargs != 2) return js_err(js, "2 args expected");
+  double a = js_getnum(args[0]);  // Fetch 1st arg
+  double b = js_getnum(args[1]);  // Fetch 2nd arg
+  return js_mknum(a + b);
 }
 
 int main(void) {
   char mem[200];
-  struct js *js = js_create(mem, sizeof(mem));  // Create JS instance
-  jsval_t v = js_import(js, sum, "iii");        // Import C function "sum"
-  js_set(js, js_glob(js), "f", v);              // Under the name "f"
-  jsval_t result = js_eval(js, "f(3, 4);", ~0); // Call "f"
-  printf("result: %s\n", js_str(js, result));   // result: 7
+  struct js *js = js_create(mem, sizeof(mem));      // Create JS instance
+  js_set(js, js_glob(js), "sum", js_mkfun(sum)));   // Import sum()
+  jsval_t result = js_eval(js, "sum(3, 4);", ~0);   // Call sum
+  printf("result: %s\n", js_str(js, result));       // result: 7
   return 0;
 }
 ```
@@ -96,8 +91,9 @@ int main(void) {
 - Operations: all standard JS operations except:
    - `!=`, `==`. Use strict comparison `!==`, `===`
    - No computed member access `a[b]`
+   - No exponentiation operation `a ** b`
 - Typeof: `typeof('a') === 'string'`
-- While: `while (...) { ... }`
+- For loop: `for (...;...;...)  ...`
 - Conditional: `if (...) ... else ...`
 - Ternary operator `a ? b : c`
 - Simple types: `let a, b, c = 12.3, d = 'a', e = null, f = true, g = false;`
@@ -109,7 +105,7 @@ int main(void) {
 ## Not supported features
 
 - No `var`, no `const`. Use `let` (strict mode only)
-- No `do`, `switch`, `for`. Use `while`
+- No `do`, `switch`, `while`. Use `for`
 - No `=>` functions. Use `let f = function(...) {...};`
 - No arrays, closures, prototypes, `this`, `new`, `delete`
 - No standard library: no `Date`, `Regexp`, `Function`, `String`, `Number`
@@ -121,10 +117,11 @@ used in a performance-critical scenarios. For example, below are the numbers
 for a simple loop code on a different architectures.
 
 ```javascript
-let a = 0;        // 97 milliseconds on a 16Mhz 8-bit Atmega328P (Arduino Uno and alike)
-while (a < 100)   // 16 milliseconds on a 48Mhz SAMD21
-  a++;            //  5 milliseconds on a 133Mhz Raspberry RP2040
-                  //  2 milliseconds on a 240Mhz ESP32
+for (let i = 0; i < 100; i++) true;
+// 97 milliseconds on a 16Mhz 8-bit Atmega328P (Arduino Uno and alike)
+// 16 milliseconds on a 48Mhz SAMD21
+//  5 milliseconds on a 133Mhz Raspberry RP2040
+//  2 milliseconds on a 240Mhz ESP32
 ```
 
 ## Build options
@@ -145,6 +142,11 @@ First, compile the object file, then rename `.text` section, e.g. for ESP32:
 $ xtensa-esp32-elf-gcc $CFLAGS elk.c -c elk.tmp
 $ xtensa-esp32-elf-objcopy --rename-section .text=.irom0.text elk.tmp elk.o
 ```
+
+Note: Elk uses `snprintf()` standard function to format numbers (double).
+On some architectures, for example AVR Arduino, that standard function does
+not support float formatting - therefore printing numbers may output nothing
+or `?` symbols.
 
 ## API reference
 
@@ -199,121 +201,90 @@ The string is allocated in the "free" memory section. If there is no
 enough space there, an empty string is returned. The returned pointer
 is valid until the next `js_eval()` call.
 
-
-### js\_import()
+### js\_glob()
 
 ```c
-jsval_t js_import(struct js *js, uintptr_t funcaddr, const char *signature);
+jsval_t js_glob(struct js *);
 ```
 
-Import an existing C function with address `funcaddr` and signature `signature`.
-Return imported function, suitable for subsequent `js_set()`.
+Return global JS object, i.e. a root namespace.
 
-- `js`: JS instance
-- `funcaddr`: C function address: `(uintptr_t) &my_function`
-- `signature`: specifies C function signature that tells how JS engine
-   should marshal JS arguments to the C function.
-	 First letter specifies return value type, following letters - parameters:
-   - `b`: a C `bool` type
-   - `d`: a C `double` type
-   - `i`: a C integer type: `char`, `short`, `int`, `long`
-   - `s`: a C string, a 0-terminated `char *`
-   - `j`: a `jsval_t`
-   - `m`: a current `struct js *`. In JS, pass `null`
-   - `p`: any C pointer
-   - `v`: valid only for the return value, means `void`
 
-The imported C function must satisfy the following requirements:
-
-- A function must have maximum 6 parameters
-- C `double` parameters could be only 1st or 2nd. For example, function
-  `void foo(double x, double y, struct bar *)` could be imported, but
-  `void foo(struct bar *, double x, double y)` could not
-- C++ functions must be declared as `extern "C"`
-- Functions with `float` params cannot be imported. Write wrappers with `double`
-
-Here are some example of the import specifications:
-- `int sum(int)` -> `js_import(js, (uintptr_t) sum, "ii")`
-- `double sub(double a, double b)` -> `js_import(js, (uintptr_t) sub, "ddd")`
-- `int rand(void)` -> `js_import(js, (uintptr_t) rand, "i")`
-- `unsigned long strlen(char *s)` -> `js_import(js, (uintptr_t) strlen, "is")`
-- `char *js_str(struct js *, js_val_t)` -> `js_import(js, (uintptr_t) js_str, "smj")`
-
-In some cases, C APIs use callback functions. For example, a timer C API could
-specify a time interval, a C function to call, and a function parameter. It is
-possible to marshal JS function as a C callback - in other words, it is
-possible to pass JS functions as C callbacks.
-
-A C callback function should take between 1 and 6 arguments. One of these
-arguments must be a `void *` pointer, that is passed to the C callback by the
-imported function. We call this `void *` parameter a "userdata" parameter.
-
-The C callback specification is enclosed into the square brackets `[...]`.
-In addition to the signature letters above, a new letter `u` is available
-that specifies userdata parameter. In JS, pass `null` for `u` param.
-Here is a complete example:
+### js\_mk\*()
 
 ```c
-#include <stdio.h>
-#include "elk.h"
+jsval_t js_mkundef(void);  // Create undefined
+jsval_t js_mknull(void);   // Create null, null, true, false
+jsval_t js_mktrue(void);   // Create true
+jsval_t js_mkfalse(void);  // Create false
+jsval_t js_mkstr(struct js *, const void *, size_t);           // Create string
+jsval_t js_mknum(double);                                      // Create number
+jsval_t js_mkerr(struct js *js, const char *fmt, ...);         // Create error
+jsval_t js_mkfun(jsval_t (*fn)(struct js *, jsval_t *, int));  // Create func
+jsval_t js_mkobj(struct js *);                                 // Create object
+void js_set(struct js *, jsval_t, const char *, jsval_t);      // Set obj attr
+```
 
-// C function that invokes a callback and returns the result of invocation
-int f(int (*fn)(int a, int b, void *userdata), void *userdata) {
-  return fn(1, 2, userdata);
-}
+Create JS values from C values
 
-int main(void) {
-  char mem[500];
-  struct js *js = js_create(mem, sizeof(mem));
-  js_set(js, js_glob(js), "f", js_import(js, f, "i[iiiu]u"));
-  jsval_t v = js_eval(js, "f(function(a,b,c){return a + b;}, 0);", ~0);
-  printf("result: %s\n", js_str(js, v));  // result: 3
-  return 0;
+### js\_get\*()
+
+```c
+enum { JS_UNDEF, JS_NULL, JS_TRUE, JS_FALSE, JS_STR, JS_NUM, JS_ERR, JS_PRIV };
+int js_type(jsval_t val);       // Return JS value type
+double js_getnum(jsval_t val);  // Get number
+int js_getbool(jsval_t val);    // Get boolean, 0 or 1
+char *js_getstr(struct js *js, jsval_t val, size_t *len);  // Get string
+```
+
+Extract C values from JS values
+
+### js\_chkargs()
+
+```c
+bool js_chkargs(jsval_t *args, int nargs, const char *spec);
+```
+
+A helper function that checks a validity of the arguments passed to a function.
+A `spec` is a 0-terminated string where each character represents a type of
+the expected argument: `b` for `bool`, `d` for number, `s` for string, `j`
+for any other JS value.
+
+Usage example - a C function that implements a JS function
+`greater_than(number1, number2)`:
+
+```c
+static jsval_t js_gt(struct js *js, jsval_t *args, int nargs) {
+  if (!js_chkargs(args, nargs, "dd")) return js_mkerr(js, "bad args!");
+  return js_getnum(args[0]) > js_getnum(args[1]) ? js_mktrue() : js_mkfalse();
 }
 ```
 
-### js\_set(), js\_glob(), js\_mkobj(), js\_mknum(), js\_mkstr()
+### js\_setmaxcss()
 
 ```c
-jsval_t js_glob(struct js *);   // Return global object
-jsval_t js_mkobj(struct js *);  // Create a new object
-jsval_t js_mkstr(struct js *, const void *, size_t);  // Create a string
-jsval_t js_mknum(struct js *, double);                // Create a number
-void js_set(struct js *, jsval_t obj, const char *key, jsval_t val);  // Assign property to an object
+void js_setmaxcss(struct js *, size_t max);
 ```
 
-These are helper functions for assigning properties to objects. The
-anticipated use case is to give names to imported C functions.
+Set maximum allowed C stack size usage
 
-Importing a C function `sum` into the global namespace:
+### js\_stats()
 
 ```c
-  jsval_t global_namespace = js_glob(js);
-  jsval_t imported_function = js_import(js, (uintptr_t) sum, "iii");
-  js_set(js, global_namespace, "f", imported_function);
+void js_stats(struct js *, size_t *total, size_t *min, size_t *cstacksize);
 ```
 
-Use `js_mkobj()` to create a dedicated object to hold groups of functions
-and keep a global namespace tidy. For example, all GPIO related functions
-can go into the `gpio` object:
+Return resource usage statistics: `total` for total usable JS memory, `min`
+for the lowest free JS memory observed (low watermark), and `cstacksize` for
+the largest C stack usage observed.
+
+### js\_dump()
 
 ```c
-  jsval_t gpio = js_mkobj(js);              // Equivalent to:
-  js_set(js, js_glob(js), "gpio", gpio);    // let gpio = {};
-
-  js_set(js, gpio, "mode",  js_import(js, (uintptr_t) func1, "iii");  // Create gpio.mode(pin, mode)
-  js_set(js, gpio, "read",  js_import(js, (uintptr_t) func2, "ii");   // Create gpio.read(pin)
-  js_set(js, gpio, "write", js_import(js, (uintptr_t) func3, "iii");  // Create gpio.write(pin, value)
+void js_dump(struct js *);
 ```
 
-### js\_usage()
-
-```c
-int js_usage(struct js *);
-```
-
-Return memory usage percentage - a number between 0 and 100.
-
+Print debug info about the current JS state to stdout. Requires `-DJS_DUMP`
 
 ## LICENSE
 

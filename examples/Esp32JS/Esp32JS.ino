@@ -1,4 +1,4 @@
-// Copyright (c) 2021 Cesanta Software Limited
+// Copyright (c) 2021-2022 Cesanta Software Limited
 // All rights reserved
 //
 // This Arduino sketch demonstrates "elk" JavaScript library integration:
