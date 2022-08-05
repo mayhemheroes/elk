@@ -1,11 +1,11 @@
 FROM --platform=linux/amd64 ubuntu:20.04 as builder
 
 RUN apt-get update
-RUN DEBIAN_FRONTEND=noninteractive apt-get install -y build-essential
+RUN DEBIAN_FRONTEND=noninteractive apt-get install -y build-essential clang
 
 COPY . /repo
-WORKDIR /repo/examples/cmdline
-RUN cc main.c ../../elk.c -I../.. -o cli -lm -DJS_DUMP=1
+WORKDIR /repo
+RUN clang -fsanitize=fuzzer harness.c elk.c -I../.. -o fuzz -lm -DJS_DUMP=1
 
 FROM ubuntu:20.04 as package
-COPY --from=builder /repo/examples/cmdline/cli /
+COPY --from=builder /repo/fuzz /

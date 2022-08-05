@@ -2,5 +2,4 @@ project: elk
 target: cli
 
 cmds:
-  - cmd: /cli -e 'let math = require("/api.js");'
-    filepath: /api.js
+  - cmd: /fuzz
