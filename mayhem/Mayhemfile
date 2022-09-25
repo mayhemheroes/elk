@@ -1,5 +1,6 @@
 project: elk
-target: cli
+target: js_eval
 
 cmds:
-  - cmd: /fuzz
+  - cmd: /fuzz_js_eval
+  libfuzzer: true
