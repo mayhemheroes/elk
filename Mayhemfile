@@ -1,5 +1,0 @@
-project: elk
-target: cli
-
-cmds:
-  - cmd: /fuzz
