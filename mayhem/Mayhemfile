@@ -3,4 +3,4 @@ target: js_eval
 
 cmds:
   - cmd: /fuzz_js_eval
-  libfuzzer: true
+    libfuzzer: true
